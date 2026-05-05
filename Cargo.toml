@@ -1,3 +1,20 @@
 [workspace]
 resolver = "3"
 members = ["crates/daemon", "crates/gui", "crates/multi-wallpaper", "crates/api-models"]
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+# TODO: Also try setting to 2, as in some weird cases it's faster
+opt-level = 3
+# TODO: If I get rid of panics from the code, I can uncomment below
+# panic = "abort"
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 1
+debug = false
