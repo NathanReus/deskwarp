@@ -3,11 +3,13 @@
 mod config;
 mod events;
 mod server;
+mod state;
 
 use config::Config;
 use events::UserEvent;
 use server::Server;
 
+use std::sync::{Arc, RwLock};
 use tokio::sync::oneshot::{Sender, channel};
 use tray_icon::{
     Icon, TrayIcon, TrayIconBuilder, TrayIconEvent,
@@ -20,10 +22,13 @@ use winit::{
     window::WindowId,
 };
 
+use crate::state::AppState;
+
 struct App {
     shutdown_tx: Option<Sender<()>>,
     server_handle: Option<Server>,
     config: Config,
+    state: Arc<RwLock<AppState>>,
     tray_menu: Option<Menu>,
     tray_menu_next_wallpaper: MenuItem,
     tray_menu_open_gui: MenuItem,
@@ -113,8 +118,11 @@ fn main() -> anyhow::Result<()> {
     // Graceful shutdown channel
     let (shutdown_tx, shutdown_rx) = channel();
 
+    // Create the app state
+    let state = Arc::new(RwLock::new(AppState::new()));
+
     // Start a server on a background thread
-    let mut server_handle = Server::new(shutdown_rx, port_file);
+    let mut server_handle = Server::new(shutdown_rx, port_file, state.clone());
 
     // Wait for server's port
     let port = server_handle.wait_for_port()?;
@@ -145,6 +153,7 @@ fn main() -> anyhow::Result<()> {
         shutdown_tx: Some(shutdown_tx),
         server_handle: Some(server_handle),
         config: config,
+        state: state,
         tray_menu: Some(tray_menu),
         tray_menu_next_wallpaper: menu_next_wallpaper,
         tray_menu_open_gui: menu_open_gui,

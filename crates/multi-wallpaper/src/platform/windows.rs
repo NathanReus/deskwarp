@@ -129,3 +129,12 @@ impl WallpaperManager for WindowsWallpaperManager {
         Ok(monitors)
     }
 }
+
+// SAFETY:
+// 1. The inner COM interface is a proxy to an out‑of‑process shell object.
+//    Calls are marshalled and thread‑safe at the system level.
+// 2. This type is intended to be used only on the thread that creates it
+//    (the COM initialisation performed by `com.rs` ensures that thread is
+//    COM‑ready).  We do not move it to other threads after construction.
+unsafe impl Send for WindowsWallpaperManager {}
+unsafe impl Sync for WindowsWallpaperManager {}

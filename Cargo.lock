@@ -555,6 +555,9 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 [[package]]
 name = "deskwarp-api-models"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "deskwarp-daemon"
@@ -562,8 +565,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "deskwarp-api-models",
  "directories",
  "image",
+ "multi-wallpaper",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

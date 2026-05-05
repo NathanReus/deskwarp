@@ -1,5 +1,7 @@
+use crate::state::AppState;
 use anyhow::Context;
-use axum::Router;
+use axum::{Json, Router, extract::State, routing::get};
+use std::sync::{Arc, RwLock};
 use std::{path::PathBuf, thread::JoinHandle};
 use tokio::sync::oneshot;
 
@@ -11,11 +13,15 @@ pub struct Server {
 
 impl Server {
     /// Spawns a new server thread and returns a handle to it.
-    pub fn new(shutdown_rx: oneshot::Receiver<()>, port_file: PathBuf) -> Self {
+    pub fn new(
+        shutdown_rx: oneshot::Receiver<()>,
+        port_file: PathBuf,
+        state: Arc<RwLock<AppState>>,
+    ) -> Self {
         let (port_tx, port_rx) = oneshot::channel();
         let thread = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-            rt.block_on(Self::run(port_tx, shutdown_rx, port_file))
+            rt.block_on(Self::run(port_tx, shutdown_rx, port_file, state))
         });
         Self {
             port_rx: Some(port_rx),
@@ -40,8 +46,11 @@ impl Server {
         port_tx: oneshot::Sender<u16>,
         shutdown_rx: oneshot::Receiver<()>,
         port_file: PathBuf,
+        state: Arc<RwLock<AppState>>,
     ) -> anyhow::Result<()> {
-        let router = Router::new().route("/api/health", axum::routing::get(|| async { "OK" }));
+        let router = Router::new()
+            .route("/api/health", get(|| async { "OK" }))
+            .with_state(state);
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
