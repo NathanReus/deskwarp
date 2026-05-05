@@ -1,0 +1,21 @@
+[package]
+name = "multi-wallpaper"
+version = "0.1.0"
+edition = "2024"
+description = "This package provides a cross-platform way to set desktop wallpapers."
+repository = "https://github.com/NathanReus/multi-wallpaper"
+license = "MIT OR Apache-2.0"
+keywords = ["wallpaper", "desktop", "background", "cross-platform"]
+categories = ["api-bindings", "os"]
+
+[dependencies]
+thiserror = "2.0.18"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }
+
+[dev-dependencies]
+serial_test = "3.4.0"
