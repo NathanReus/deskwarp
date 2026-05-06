@@ -4,12 +4,16 @@ mod config;
 mod events;
 mod server;
 mod state;
+mod wallpaper_commands;
 
 use config::Config;
 use events::UserEvent;
+use multi_wallpaper::WallpaperStyle;
 use server::Server;
+use wallpaper_commands::WallpaperCommand;
 
-use std::sync::{Arc, RwLock};
+use std::ffi::OsStr;
+use std::sync::Arc;
 use tokio::sync::oneshot::{Sender, channel};
 use tray_icon::{
     Icon, TrayIcon, TrayIconBuilder, TrayIconEvent,
@@ -28,7 +32,7 @@ struct App {
     shutdown_tx: Option<Sender<()>>,
     server_handle: Option<Server>,
     config: Config,
-    state: Arc<RwLock<AppState>>,
+    wallpaper: multi_wallpaper::Wallpaper,
     tray_menu: Option<Menu>,
     tray_menu_next_wallpaper: MenuItem,
     tray_menu_open_gui: MenuItem,
@@ -57,10 +61,54 @@ impl App {
 
         Icon::from_rgba(pixels, width, height).expect("Failed to load icon")
     }
+
+    fn handle_wallpaper_command(&self, cmd: WallpaperCommand) {
+        match cmd {
+            WallpaperCommand::ListMonitors { reply } => {
+                let monitors = self
+                    .wallpaper
+                    .list_monitors()
+                    .map(|vec| {
+                        vec.into_iter()
+                            .map(|id| id.to_string_lossy().into_owned())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+
+                let _ = reply.send(monitors);
+            }
+            WallpaperCommand::GetWallpaper { monitor, reply } => {
+                let monitor_os = monitor.as_ref().map(|s| std::ffi::OsStr::new(s));
+                let path = self.wallpaper.get(monitor_os).ok().flatten();
+                let _ = reply.send(path);
+            }
+            WallpaperCommand::GetStyle { reply } => {
+                let style = self.wallpaper.get_style().unwrap_or(WallpaperStyle::Fill);
+                let _ = reply.send(style);
+            }
+            WallpaperCommand::SetStyle { style, reply } => {
+                let res = self.wallpaper.set_style(style).map_err(|e| e.to_string());
+                let _ = reply.send(res);
+            }
+            WallpaperCommand::SetWallpaper {
+                path,
+                style,
+                monitor,
+                reply,
+            } => {
+                let monitor_os = monitor.as_ref().map(|s| OsStr::new(s));
+                let res = self
+                    .wallpaper
+                    .set(&path, style, monitor_os.as_deref())
+                    .map_err(|e| e.to_string());
+                let _ = reply.send(res);
+            }
+        }
+    }
 }
 
 impl ApplicationHandler<UserEvent> for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {
         if self.tray_icon.is_none() {
             self.tray_icon = Some(self.new_tray_icon());
         }
@@ -68,16 +116,34 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
-        window_id: WindowId,
-        event: WindowEvent,
+        _event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        _event: WindowEvent,
     ) {
         // No windows to handle, but Trait requires this method
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::TrayIconEvent(tray_icon_event) => {}
+            UserEvent::TrayIconEvent(tray_icon_event) => match tray_icon_event {
+                TrayIconEvent::Click {
+                    id,
+                    position,
+                    rect,
+                    button,
+                    button_state,
+                } => {}
+                TrayIconEvent::DoubleClick {
+                    id,
+                    position,
+                    rect,
+                    button,
+                } => {}
+                TrayIconEvent::Enter { id, position, rect } => {}
+                TrayIconEvent::Move { id, position, rect } => {}
+                TrayIconEvent::Leave { id, position, rect } => {}
+                _ => {}
+            },
             UserEvent::MenuEvent(menu_event) => {
                 if menu_event.id() == self.tray_menu_next_wallpaper.id() {
                     tracing::info!("Next wallpaper requested");
@@ -91,10 +157,11 @@ impl ApplicationHandler<UserEvent> for App {
                     event_loop.exit();
                 }
             }
+            UserEvent::WallpaperCommandEvent(cmd) => self.handle_wallpaper_command(cmd),
         }
     }
 
-    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         // Perform any cleanup here before exiting
     }
 }
@@ -115,11 +182,29 @@ fn main() -> anyhow::Result<()> {
     let config = Config::load(&config_path);
     let port_file = proj_dirs.config_dir().join("daemon_port");
 
+    // Tray (main thread)
+    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
+
+    // Forward events from tray to the event loop
+    let proxy = event_loop.create_proxy();
+    TrayIconEvent::set_event_handler(Some(move |event| {
+        let _ = proxy.send_event(UserEvent::TrayIconEvent(event));
+    }));
+
+    // Forward events from menu to the event loop
+    let proxy = event_loop.create_proxy();
+    MenuEvent::set_event_handler(Some(move |event| {
+        let _ = proxy.send_event(UserEvent::MenuEvent(event));
+    }));
+
+    // A proxy for sending wallpaper commands to the event loop
+    let wallpaper_proxy = event_loop.create_proxy();
+
+    // Create the app state with the wallpaper command channel
+    let state = Arc::new(AppState::new(wallpaper_proxy.clone()));
+
     // Graceful shutdown channel
     let (shutdown_tx, shutdown_rx) = channel();
-
-    // Create the app state
-    let state = Arc::new(RwLock::new(AppState::new()));
 
     // Start a server on a background thread
     let mut server_handle = Server::new(shutdown_rx, port_file, state.clone());
@@ -128,20 +213,9 @@ fn main() -> anyhow::Result<()> {
     let port = server_handle.wait_for_port()?;
     tracing::info!("Daemon ready, tray will connect to port {}", port);
 
-    // Tray (main thread)
-    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
-
-    // Forward events from tray to the event loop
-    let proxy = event_loop.create_proxy();
-    TrayIconEvent::set_event_handler(Some(move |event| {
-        proxy.send_event(UserEvent::TrayIconEvent(event));
-    }));
-
-    // Forward events from menu to the event loop
-    let proxy = event_loop.create_proxy();
-    MenuEvent::set_event_handler(Some(move |event| {
-        proxy.send_event(UserEvent::MenuEvent(event));
-    }));
+    // Create the Wallpaper instance (must be on the main thread)
+    let wallpaper =
+        multi_wallpaper::Wallpaper::new().expect("Failed to create Wallpaper on main thread");
 
     // Build the tray menu
     let menu_next_wallpaper = MenuItem::new("Next wallpaper", true, None);
@@ -153,7 +227,7 @@ fn main() -> anyhow::Result<()> {
         shutdown_tx: Some(shutdown_tx),
         server_handle: Some(server_handle),
         config: config,
-        state: state,
+        wallpaper: wallpaper,
         tray_menu: Some(tray_menu),
         tray_menu_next_wallpaper: menu_next_wallpaper,
         tray_menu_open_gui: menu_open_gui,

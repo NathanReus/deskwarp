@@ -1,18 +1,12 @@
-use multi_wallpaper::Wallpaper;
-use std::sync::{Arc, RwLock};
+use crate::events::UserEvent;
+use winit::event_loop::EventLoopProxy;
 
 pub struct AppState {
-    pub wallpaper: Wallpaper,
+    pub proxy: EventLoopProxy<UserEvent>,
 }
 
 impl AppState {
-    pub fn new() -> Self {
-        Self {
-            wallpaper: Wallpaper::new().expect("failed to create wallpaper"),
-        }
-    }
-
-    pub fn into_arc(self) -> Arc<RwLock<Self>> {
-        Arc::new(RwLock::new(self))
+    pub fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
+        Self { proxy }
     }
 }

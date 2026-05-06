@@ -1,7 +1,10 @@
+mod helpers;
+mod routes;
+
 use crate::state::AppState;
 use anyhow::Context;
-use axum::{Json, Router, extract::State, routing::get};
-use std::sync::{Arc, RwLock};
+use axum::{Router, routing::get};
+use std::sync::Arc;
 use std::{path::PathBuf, thread::JoinHandle};
 use tokio::sync::oneshot;
 
@@ -16,7 +19,7 @@ impl Server {
     pub fn new(
         shutdown_rx: oneshot::Receiver<()>,
         port_file: PathBuf,
-        state: Arc<RwLock<AppState>>,
+        state: Arc<AppState>,
     ) -> Self {
         let (port_tx, port_rx) = oneshot::channel();
         let thread = std::thread::spawn(move || {
@@ -46,10 +49,16 @@ impl Server {
         port_tx: oneshot::Sender<u16>,
         shutdown_rx: oneshot::Receiver<()>,
         port_file: PathBuf,
-        state: Arc<RwLock<AppState>>,
+        state: Arc<AppState>,
     ) -> anyhow::Result<()> {
         let router = Router::new()
             .route("/api/health", get(|| async { "OK" }))
+            .route("/api/monitors", get(routes::list_monitors))
+            .route(
+                "/api/wallpaper",
+                get(routes::get_current_wallpaper).post(routes::set_wallpaper),
+            )
+            .route("/api/style", get(routes::get_style).put(routes::set_style))
             .with_state(state);
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
