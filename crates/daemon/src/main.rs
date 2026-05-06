@@ -10,8 +10,10 @@ use config::Config;
 use events::UserEvent;
 use multi_wallpaper::WallpaperStyle;
 use server::Server;
+use state::AppState;
 use wallpaper_commands::WallpaperCommand;
 
+use image::imageops::{FilterType, resize};
 use std::ffi::OsStr;
 use std::sync::Arc;
 use tokio::sync::oneshot::{Sender, channel};
@@ -25,8 +27,6 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop},
     window::WindowId,
 };
-
-use crate::state::AppState;
 
 struct App {
     shutdown_tx: Option<Sender<()>>,
@@ -42,7 +42,7 @@ struct App {
 
 impl App {
     fn new_tray_icon(&mut self) -> TrayIcon {
-        let icon = Self::load_icon();
+        let icon = Self::load_icon(32);
 
         TrayIconBuilder::new()
             .with_menu(Box::new(self.tray_menu.as_ref().unwrap().clone()))
@@ -52,10 +52,11 @@ impl App {
             .expect("Failed to create tray icon")
     }
 
-    fn load_icon() -> Icon {
-        let rgba = image::load_from_memory(include_bytes!("../assets/images/icon.png"))
-            .expect("Failed to load icon")
-            .into_rgba8();
+    fn load_icon(target_size: u32) -> Icon {
+        let image = image::load_from_memory(include_bytes!("../assets/images/icon.png"))
+            .expect("Failed to load icon");
+        let rgba = resize(&image, target_size, target_size, FilterType::Lanczos3);
+
         let (width, height) = rgba.dimensions();
         let pixels = rgba.into_raw();
 
