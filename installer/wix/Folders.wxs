@@ -1,0 +1,17 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <!-- Use StandardDirectory to reference the per-user local app data folder -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <!-- Define our application's directory inside it -->
+      <Directory Id="INSTALLDIR" Name="!(bind.Property.ProductName)" />
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <!-- Use StandardDirectory to reference the per-user program menu folder -->
+    <StandardDirectory Id="ProgramMenuFolder">
+    <!-- Define our application's directory inside it -->
+      <Directory Id="STARTMENUSHORTCUTDIR" Name="!(bind.Property.ProductName)" />
+    </StandardDirectory>
+  </Fragment>
+</Wix>

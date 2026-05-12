@@ -2,6 +2,10 @@ use ico::IconDir;
 use std::{env, fs, io::Cursor, path::PathBuf};
 
 fn main() {
+    // Statically link the VCRuntime while dynamically linking Universal CRT
+    #[cfg(target_os = "windows")]
+    static_vcruntime::metabuild();
+
     // Extract RGBA from ICO for tray icon
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let icon_path = PathBuf::from("assets/images/icon.ico");

@@ -67,19 +67,24 @@ impl Server {
 
         let port = listener.local_addr()?.port();
 
+        tracing::info!(port = %port, "Server socket bound");
+
         // Write port to file
         std::fs::write(&port_file, port.to_string())?;
 
         // Send port back to main thread so the tray can be setup
         let _ = port_tx.send(port);
 
-        tracing::info!("Server listening on port {}", port);
+        tracing::info!("Server ready, awaiting requests");
 
         axum::serve(listener, router)
             .with_graceful_shutdown(async {
                 shutdown_rx.await.ok();
+                tracing::info!("Shutdown signal received, stopping server...");
             })
             .await?;
+
+        tracing::info!("Server stopped gracefully");
 
         Ok(())
     }

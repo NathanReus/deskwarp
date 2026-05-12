@@ -1,0 +1,36 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <ComponentGroup Id="ApplicationComponents" Directory="INSTALLDIR">
+      <!-- Daemon Executable -->
+      <Component Id="DaemonComponent" Guid="17D05D9B-4E31-43D0-B363-05C987B870D1">
+        <File Id="DaemonExe" Name="deskwarp-daemon.exe" Source="target\release\deskwarp-daemon.exe" KeyPath="yes" />
+      </Component>
+      <!-- GUI Executable -->
+      <!-- <Component Id="GuiComponent" Guid="C44BD7D0-BFDA-407D-A672-DD55C06749E9">
+        <File Id="GuiExe" Name="deskwarp-gui.exe" Source="target\release\deskwarp-gui.exe" KeyPath="yes" />
+      </Component> -->
+      <!-- Auto-Start via Registry Run Key -->
+      <Component Id="StartupRegistryComponent" Guid="30D3B943-5C6A-49A7-BC6F-BCA7415C00E2">
+        <RegistryValue
+                    Root="HKCU"
+                    Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                    Name="!(bind.Property.ProductName)"
+                    Value="[#DaemonExe]"
+                    Type="string"
+                    KeyPath="yes"
+                />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+  <Fragment>
+    <ComponentGroup Id="ShortcutComponents" Directory="STARTMENUSHORTCUTDIR">
+        <!-- Start Menu Shortcuts -->
+        <Component Id="DaemonShortcutComponent" Guid="1B150089-7955-4643-871F-868E6D87C4F8">
+            <Shortcut Id="DaemonStartMenuShortcut" Name="!(bind.Property.ProductName)" Target="[#DaemonExe]" WorkingDirectory="INSTALLDIR" />
+        </Component>
+        <!-- <Component Id="GuiShortcutComponent" Guid="D42B634E-9D20-4480-A6BE-ECC16EE823D7">
+            <Shortcut Id="GuiStartMenuShortcut" Name="!(Property.ProductName) Configuration" Target="[#GuiExe]" WorkingDirectory="INSTALLDIR" />
+        </Component> -->
+    </ComponentGroup>
+  </Fragment>
+</Wix>

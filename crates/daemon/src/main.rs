@@ -7,16 +7,18 @@ mod state;
 mod wallpaper_commands;
 
 use config::Config;
+use directories::ProjectDirs;
 use events::UserEvent;
 use multi_wallpaper::WallpaperStyle;
 use server::Server;
 use state::AppState;
 use wallpaper_commands::WallpaperCommand;
 
-use image::imageops::{FilterType, resize};
 use std::ffi::OsStr;
 use std::sync::Arc;
 use tokio::sync::oneshot::{Sender, channel};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::{Layer, prelude::*};
 use tray_icon::{
     Icon, TrayIcon, TrayIconBuilder, TrayIconEvent,
     menu::{Menu, MenuEvent, MenuItem},
@@ -62,6 +64,7 @@ impl App {
     fn handle_wallpaper_command(&self, cmd: WallpaperCommand) {
         match cmd {
             WallpaperCommand::ListMonitors { reply } => {
+                tracing::debug!("Handling ListMonitors command");
                 let monitors = self
                     .wallpaper
                     .list_monitors()
@@ -71,20 +74,27 @@ impl App {
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
+                tracing::debug!(count = monitors.len(), "ListMonitors returned");
 
                 let _ = reply.send(monitors);
             }
             WallpaperCommand::GetWallpaper { monitor, reply } => {
+                tracing::debug!(?monitor, "Handling GetWallpaper command");
                 let monitor_os = monitor.as_ref().map(|s| std::ffi::OsStr::new(s));
                 let path = self.wallpaper.get(monitor_os).ok().flatten();
+                tracing::debug!(?path, "GetWallpaper succeeded");
                 let _ = reply.send(path);
             }
             WallpaperCommand::GetStyle { reply } => {
+                tracing::debug!("Handling GetStyle command");
                 let style = self.wallpaper.get_style().unwrap_or(WallpaperStyle::Fill);
+                tracing::debug!(?style, "GetStyle succeeded");
                 let _ = reply.send(style);
             }
             WallpaperCommand::SetStyle { style, reply } => {
+                tracing::debug!(?style, "Handling SetStyle command");
                 let res = self.wallpaper.set_style(style).map_err(|e| e.to_string());
+                tracing::debug!(?res, "SetStyle succeeded");
                 let _ = reply.send(res);
             }
             WallpaperCommand::SetWallpaper {
@@ -93,11 +103,13 @@ impl App {
                 monitor,
                 reply,
             } => {
+                tracing::debug!(path = ?path.display(), ?style, ?monitor, "Handling SetWallpaper command");
                 let monitor_os = monitor.as_ref().map(|s| OsStr::new(s));
                 let res = self
                     .wallpaper
                     .set(&path, style, monitor_os.as_deref())
                     .map_err(|e| e.to_string());
+                tracing::debug!(?res, "SetWallpaper succeeded");
                 let _ = reply.send(res);
             }
         }
@@ -164,20 +176,27 @@ impl ApplicationHandler<UserEvent> for App {
 }
 
 fn main() -> anyhow::Result<()> {
-    // Logging
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
+    // TODO - Move all config stuff out into config.rs
     // Project directories
-    let proj_dirs = directories::ProjectDirs::from("app", "deskwarp", "deskwarp-daemon")
-        .expect("failed to get project directories");
-    std::fs::create_dir_all(proj_dirs.config_dir())?;
+    let proj_dirs =
+        ProjectDirs::from("", "", "DeskWarp").expect("failed to get project directories");
+    std::fs::create_dir_all(proj_dirs.config_local_dir())?;
+
+    // Setup logging
+    let _log_guard = setup_logging(&proj_dirs);
+
+    tracing::info!(
+        "DeskWarp daemon starting (version {})",
+        env!("CARGO_PKG_VERSION")
+    );
+    tracing::debug!("Config directory: {:?}", proj_dirs.config_local_dir());
 
     // Config
-    let config_path = proj_dirs.config_dir().join("config.toml");
+    let config_path = proj_dirs.config_local_dir().join("config.toml");
     let config = Config::load(&config_path);
-    let port_file = proj_dirs.config_dir().join("daemon_port");
+    let port_file = proj_dirs.config_local_dir().join("daemon_port");
+
+    tracing::info!("Configuration loaded.");
 
     // Tray (main thread)
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
@@ -208,17 +227,21 @@ fn main() -> anyhow::Result<()> {
 
     // Wait for server's port
     let port = server_handle.wait_for_port()?;
-    tracing::info!("Daemon ready, tray will connect to port {}", port);
+    tracing::info!(port = %port, "HTTP server listening on 127.0.0.1");
 
     // Create the Wallpaper instance (must be on the main thread)
     let wallpaper =
         multi_wallpaper::Wallpaper::new().expect("Failed to create Wallpaper on main thread");
+
+    tracing::info!("Wallpaper instance created on main thread");
 
     // Build the tray menu
     let menu_next_wallpaper = MenuItem::new("Next wallpaper", true, None);
     let menu_open_gui = MenuItem::new("Open settings", true, None);
     let menu_exit = MenuItem::new("Exit", true, None);
     let tray_menu = Menu::with_items(&[&menu_next_wallpaper, &menu_open_gui, &menu_exit])?;
+
+    tracing::info!("System tray icon created");
 
     let mut app = App {
         shutdown_tx: Some(shutdown_tx),
@@ -235,10 +258,62 @@ fn main() -> anyhow::Result<()> {
     // This blocks until event_loop.exit() is called
     event_loop.run_app(&mut app)?;
 
+    tracing::info!("Exiting");
+
     // Wait for the server thread to finish
     if let Some(handle) = app.server_handle.take() {
         handle.join()?;
     }
 
     Ok(())
+}
+
+fn setup_logging(proj_dirs: &ProjectDirs) -> impl Drop {
+    // TODO - Change to dynamic logging using tracing-subscriber::reload
+    // Create a log directory inside the data directory
+    let log_dir = proj_dirs.data_local_dir().join("logs");
+    std::fs::create_dir_all(&log_dir).expect("Failed to create log directory");
+
+    // Rolling file appender: daily, keep last 7 files
+    let file_appender = RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix("deskwarp-daemon")
+        .filename_suffix("log")
+        .max_log_files(7)
+        .build(log_dir)
+        .expect("Failed to create rolling file appender");
+
+    // Convert the file appender to a tracing writer
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+    // Set up the subscriber
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    // Console layer (stderr) – only enable in debug builds
+    let console_layer = if cfg!(debug_assertions) {
+        Some(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_filter(env_filter.clone()),
+        )
+    } else {
+        None
+    };
+
+    // File layer
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false) // no colors in log file
+        .with_filter(env_filter);
+
+    // Combine layers
+    let subscriber = tracing_subscriber::registry()
+        .with(console_layer)
+        .with(file_layer);
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("failed to set global tracing subscriber");
+
+    guard // must be kept alive for the duration of the program
 }

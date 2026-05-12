@@ -1,0 +1,19 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="DeskWarp" Id="NathanReus.DeskWarp" Manufacturer="Nathan Reus" Version="0.1.0" Scope="perUser">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of !(bind.Property.ProductName) is already installed." />
+
+    <Feature Id="MainFeature" Title="DeskWarp Desktop Wallpaper Manager" Level="1">
+      <ComponentGroupRef Id="ApplicationComponents" />
+      <ComponentGroupRef Id="ShortcutComponents" />
+    </Feature>
+
+    <!-- Embed the icon file into the MSI -->
+    <Icon Id="DeskWarpIcon.exe" SourceFile="crates/daemon/assets/images/icon.ico" />
+
+    <!-- Tell Windows to use this icon in Add/Remove Programs -->
+    <Property Id="ARPPRODUCTICON" Value="DeskWarpIcon.exe" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+  </Package>
+
+</Wix>
