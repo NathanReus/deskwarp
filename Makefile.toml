@@ -1,0 +1,20 @@
+[env]
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+
+[tasks.dev]
+workspace = false
+dependencies = ["build"]
+
+[tasks.msi]
+workspace = false
+command = "wix"
+args = ["build", "-o", "target/wix/deskwarp-installer.msi", "installer/wix/Package.wxs", "installer/wix/Folders.wxs", "installer/wix/Components.wxs"]
+dependencies = ["build-release"]
+
+[tasks.installer]
+workspace = false
+dependencies = [
+    "pre-publish-clean-flow",
+    "check-format-flow",
+    "msi",
+]
