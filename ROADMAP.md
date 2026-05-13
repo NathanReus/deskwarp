@@ -4,6 +4,8 @@ This document tracks progress toward the first public release of DeskWarp, a Win
 
 **Target:** Windows only (Linux and macOS will be added in future releases).
 
+***May be subject to change***
+
 ---
 
 ## 1. Project Structure & Tooling
